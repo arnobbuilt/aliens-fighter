@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ALIENS FIGHTER XTREME</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; overflow: hidden; background: black;
+  }
+  canvas {
+    display: block;
+    margin: 0 auto;
+    background: black;
+  }
+  #score {
+    position: absolute;
+    top: 10px; left: 10px;
+    color: #0f0;
+    font-family: monospace;
+    font-size: 20px;
+  }
+  #footer {
+    position: absolute;
+    bottom: 10px; right: 10px;
+    color: #0f0;
+    font-family: monospace;
+    font-size: 14px;
+  }
+  #leaderboard {
+    position: absolute;
+    top: 40px; left: 10px;
+    color: #0f0;
+    font-family: monospace;
+    font-size: 16px;
+  }
+  #startOverlay, #gameOverOverlay {
+    position: absolute;
+    width: 100%; height: 100%;
+    background: rgba(0,0,0,0.85);
+    color: #0f0;
+    font-family: monospace;
+    font-size: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    z-index: 10;
+  }
+  #gameOverOverlay button {
+    margin-top: 20px;
+    font-size: 20px;
+    padding: 10px 20px;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+  <div id="startOverlay">Click to Start Game</div>
+  <div id="gameOverOverlay" style="display:none;">
+    <div id="finalScore">Your Score: 0</div>
+    <button id="restartBtn">Restart Game</button>
+  </div>
+  <canvas id="gameCanvas" width="480" height="800"></canvas>
+  <div id="score">Score: 0</div>
+  <div id="leaderboard">
+    <strong>Leaderboard</strong>
+    <ol id="highScores"></ol>
+  </div>
+  <div id="footer">Made by Arnob</div>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+const width = canvas.width;
+const height = canvas.height;
+
+const startOverlay = document.getElementById("startOverlay");
+const gameOverOverlay = document.getElementById("gameOverOverlay");
+const finalScoreEl = document.getElementById("finalScore");
+const restartBtn = document.getElementById("restartBtn");
+
+// Initialize sounds but DO NOT play until user interaction!
+const shootSound = new Audio('https://actions.google.com/sounds/v1/weapons/laser_gun_1.mp3');
+const explosionSound = new Audio('https://actions.google.com/sounds/v1/explosions/explosion_1.mp3');
+const bgMusic = new Audio('https://cdn.pixabay.com/download/audio/2022/03/15/audio_c1a1e393b0.mp3?filename=arcade-music-loop-110143.mp3');
+bgMusic.loop = true;
+bgMusic.volume = 0.3;
+
+shootSound.volume = 0.5;
+explosionSound.volume = 0.6;
+
+let musicStarted = false;
+let gameStarted = false;
+let gameOver = false;
+
+let player = {
+  x: width / 2 - 25,
+  y: height - 80,
+  width: 50,
+  height: 60,
+  speed: 5,
+  alive: true
+};
+
+let bullets = [];
+let enemyBullets = [];
+let enemies = [];
+let score = 0;
+let keys = {};
+let frame = 0;
+let highScores = JSON.parse(localStorage.getItem('highScores') || '[]');
+
+const stars = [];
+for(let i=0; i<100; i++){
+  stars.push({
+    x: Math.random()*width,
+    y: Math.random()*height,
+    size: Math.random()*2 + 1,
+    speed: Math.random()*0.5 + 0.2
+  });
+}
+
+function drawStars(){
+  ctx.fillStyle = '#0f0';
+  stars.forEach(star => {
+    ctx.beginPath();
+    ctx.arc(star.x, star.y, star.size, 0, Math.PI*2);
+    ctx.fill();
+  });
+}
+
+function updateStars(){
+  stars.forEach(star => {
+    star.y += star.speed;
+    if(star.y > height){
+      star.y = 0;
+      star.x = Math.random()*width;
+    }
+  });
+}
+
+function drawPlayer() {
+  if (!player.alive) return;
+  ctx.fillStyle = '#0f0';
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+
+  ctx.beginPath();
+  ctx.moveTo(player.x + player.width / 2, player.y);
+  ctx.lineTo(player.x + player.width * 0.9, player.y + player.height * 0.7);
+  ctx.lineTo(player.x + player.width * 0.6, player.y + player.height * 0.7);
+  ctx.lineTo(player.x + player.width * 0.6, player.y + player.height);
+  ctx.lineTo(player.x + player.width * 0.4, player.y + player.height);
+  ctx.lineTo(player.x + player.width * 0.4, player.y + player.height * 0.7);
+  ctx.lineTo(player.x + player.width * 0.1, player.y + player.height * 0.7);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = '#0ff';
+  ctx.beginPath();
+  ctx.ellipse(player.x + player.width / 2, player.y + player.height * 0.5, 8, 12, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+}
+
+function drawBullets() {
+  ctx.fillStyle = '#0ff';
+  bullets.forEach(bullet => {
+    ctx.fillRect(bullet.x, bullet.y, 4, 10);
+  });
+}
+
+function drawEnemyBullets() {
+  ctx.fillStyle = '#f0f';
+  enemyBullets.forEach(bullet => {
+    ctx.fillRect(bullet.x, bullet.y, 5, 12);
+  });
+}
+
+function drawAlien(enemy){
+  ctx.fillStyle = '#880000';
+  ctx.beginPath();
+
+  let spikes = 8;
+  let angleStep = (Math.PI * 2) / spikes;
+  for(let i=0; i<=spikes; i++){
+    let radius = i % 2 === 0 ? enemy.radius : enemy.radius - 8;
+    let angle = i * angleStep;
+    let x = enemy.x + Math.cos(angle) * radius;
+    let y = enemy.y + Math.sin(angle) * radius;
+    if(i === 0) ctx.moveTo(x,y);
+    else ctx.lineTo(x,y);
+  }
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = '#ff0000';
+  ctx.beginPath();
+  ctx.ellipse(enemy.x - 8, enemy.y - 5, 5, 8, 0, 0, Math.PI * 2);
+  ctx.ellipse(enemy.x + 8, enemy.y - 5, 5, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawEnemies() {
+  enemies.forEach(enemy => {
+    if (enemy.boss) {
+      ctx.fillStyle = '#550000';
+      ctx.beginPath();
+
+      let spikes = 16;
+      let angleStep = (Math.PI * 2) / spikes;
+      for(let i=0; i<=spikes; i++){
+        let radius = i % 2 === 0 ? enemy.radius : enemy.radius - 15;
+        let angle = i * angleStep;
+        let x = enemy.x + Math.cos(angle) * radius;
+        let y = enemy.y + Math.sin(angle) * radius;
+        if(i === 0) ctx.moveTo(x,y);
+        else ctx.lineTo(x,y);
+      }
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#ff0';
+      ctx.fillRect(enemy.x - 20, enemy.y - 20, 40, 40);
+      ctx.fillStyle = '#000';
+      ctx.fillRect(enemy.x - 12, enemy.y - 12, 8, 16);
+      ctx.fillRect(enemy.x + 4, enemy.y - 12, 8, 16);
+
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(enemy.x - 60, enemy.y - enemy.radius - 20, 120, 12);
+      ctx.fillStyle = '#0f0';
+      ctx.fillRect(enemy.x - 60, enemy.y - enemy.radius - 20, 120 * (enemy.health / enemy.maxHealth), 12);
+    } else {
+      drawAlien(enemy);
+    }
+  });
+}
+
+function updateBullets() {
+  bullets.forEach((bullet, index) => {
+    bullet.y -= 10;
+    if (bullet.y < 0) bullets.splice(index, 1);
+  });
+}
+
+function updateEnemyBullets() {
+  enemyBullets.forEach((bullet, index) => {
+    bullet.y += 4;
+    if (bullet.y > height) enemyBullets.splice(index, 1);
+    if(player.alive){
+      if (
+        bullet.x > player.x &&
+        bullet.x < player.x + player.width &&
+        bullet.y > player.y &&
+        bullet.y < player.y + player.height
+      ) {
+        explosionSound.currentTime = 0;
+        explosionSound.play();
+        enemyBullets.splice(index, 1);
+        player.alive = false;
+        gameOver = true;
+        showGameOver();
+      }
+    }
+  });
+}
+
+function updateEnemies() {
+  enemies.forEach((enemy, eIndex) => {
+    enemy.y += enemy.boss ? 0.3 : 0.5;
+    if (enemy.y > height) enemies.splice(eIndex, 1);
+
+    if(enemy.boss || !enemy.boss){
+      if(Math.random() < 0.008){
+        enemyBullets.push({x: enemy.x, y: enemy.y + enemy.radius});
+      }
+    }
+
+    bullets.forEach((bullet, bIndex) => {
+      const dx = bullet.x - enemy.x;
+      const dy = bullet.y - enemy.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      if (distance < enemy.radius) {
+        explosionSound.currentTime = 0;
+        explosionSound.play();
+        bullets.splice(bIndex, 1);
+        enemy.health -= enemy.boss ? 5 : 1;
+        if(enemy.health <= 0){
+          enemies.splice(eIndex, 1);
+          score += enemy.boss ? 10 : 1;
+          document.getElementById("score").innerText = "Score: " + score;
+          updateLeaderboard();
+        }
+      }
+    });
+  });
+}
+
+function spawnEnemy() {
+  if (frame % 120 === 0) {
+    let boss = score > 15 && Math.random() < 0.15;
+    enemies.push({
+      x: Math.random() * (width - 60) + 30,
+      y: -40,
+      radius: boss ? 60 : 20,
+      boss: boss,
+      health: boss ? 60 : 1,
+      maxHealth: boss ? 60 : 1
+    });
+  }
+}
+
+function updatePlayer() {
+  if (!player.alive) return;
+  if (keys["ArrowLeft"] && player.x > 0) player.x -= player.speed;
+  if (keys["ArrowRight"] && player.x + player.width < width) player.x += player.speed;
+}
+
+function shoot() {
+  if(!player.alive) return;
+  bullets.push({
+    x: player.x + player.width / 2 - 2,
+    y: player.y
+  });
+  // Play shoot sound if allowed
+  try {
+    shootSound.currentTime = 0;
+    shootSound.play();
+  } catch(e) {}
+}
+
+function updateLeaderboard() {
+  highScores.push(score);
+  highScores = [...new Set(highScores)].sort((a,b)=>b-a).slice(0,5);
+  localStorage.setItem('highScores', JSON.stringify(highScores));
+  const list = document.getElementById("highScores");
+  list.innerHTML = "";
+  highScores.forEach(s => {
+    const li = document.createElement("li");
+    li.textContent = s;
+    list.appendChild(li);
+  });
+}
+
+function showGameOver(){
+  finalScoreEl.textContent = "Your Score: " + score;
+  gameOverOverlay.style.display = "flex";
+}
+
+function resetGame(){
+  gameOver = false;
+  player.alive = true;
+  player.x = width / 2 - 25;
+  bullets = [];
+  enemyBullets = [];
+  enemies = [];
+  score = 0;
+  frame = 0;
+  document.getElementById("score").innerText = "Score: 0";
+  gameOverOverlay.style.display = "none";
+  startOverlay.style.display = "none";
+  loop();
+}
+
+function loop() {
+  if(gameOver){
+    return;
+  }
+  ctx.clearRect(0, 0, width, height);
+  updateStars();
+  drawStars();
+
+  drawPlayer();
+  drawBullets();
+  drawEnemyBullets();
+  drawEnemies();
+  updatePlayer();
+  updateBullets();
+  updateEnemyBullets();
+  updateEnemies();
+  spawnEnemy();
+
+  frame++;
+  requestAnimationFrame(loop);
+}
+
+// --- User interaction to start sound and music on first click ---
+function startGame() {
+  if (!musicStarted) {
+    // Play sounds after user interaction allowed
+    shootSound.play().catch(() => {});
+    explosionSound.play().catch(() => {});
+    bgMusic.play().then(() => {
+      musicStarted = true;
+    }).catch(() => {
+      console.log("Music playback prevented by browser, try interacting again");
+    });
+  }
+  if (!gameStarted) {
+    updateLeaderboard();
+    resetGame();
+    gameStarted = true;
+  }
+  startOverlay.style.display = "none";
+}
+
+window.addEventListener("keydown", (e) => {
+  keys[e.key] = true;
+  if (e.key === " ") shoot();
+});
+
+window.addEventListener("keyup", (e) => {
+  keys[e.key] = false;
+});
+
+canvas.addEventListener("click", () => {
+  shoot();
+  startGame();
+});
+
+window.addEventListener("click", () => {
+  startGame();
+});
+
+restartBtn.addEventListener("click", () => {
+  resetGame();
+});
+
+</script>
+</body>
+</html>
